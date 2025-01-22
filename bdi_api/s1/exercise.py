@@ -111,7 +111,7 @@ def prepare_data() -> str:
     else:
         os.makedirs(prepared_dir)
 
-    # Process each raw file
+    
     for file_name in os.listdir(raw_dir):
         print(f"Processing file: {file_name}")
         raw_file_path = os.path.join(raw_dir, file_name)
@@ -124,7 +124,7 @@ def prepare_data() -> str:
                 timestamp = data.get("now", None)
                 aircraft_data = data.get("aircraft", [])
                 
-                # Extract and process relevant fields
+                
                 processed_data = []
                 for record in aircraft_data:
                     processed_data.append({
@@ -140,7 +140,7 @@ def prepare_data() -> str:
                         "had_emergency": record.get("alert", 0) == 1,
                     })
 
-                # Save the processed data
+                # Saving the processed data
                 with open(prepared_file_path, "w", encoding="utf-8") as prepared_file:
                     json.dump(processed_data, prepared_file)
                 print(f"Processed and saved: {prepared_file_path}")
