@@ -1,18 +1,18 @@
-import os
-from typing import Annotated
-import requests
-from tqdm import tqdm
-from bs4 import BeautifulSoup
-import pandas as pd
 import json
+import os
+import shutil
+from datetime import datetime, timedelta
+from typing import Annotated
 
-
-from fastapi import APIRouter, status, HTTPException
+import requests
+from fastapi import APIRouter, status
 from fastapi.params import Query
 
 from bdi_api.settings import Settings
 
 settings = Settings()
+RAW_DATA_PATH = os.path.join(settings.raw_dir, "day=20231101")
+PREPARED_DATA_PATH = os.path.join(settings.prepared_dir, "day=20231101")
 
 s1 = APIRouter(
     responses={
@@ -24,204 +24,191 @@ s1 = APIRouter(
 )
 
 
+def clean_folder(path: str):
+    """Cleans the specified folder by removing all its contents."""
+    if os.path.exists(path):
+        shutil.rmtree(path)
+    os.makedirs(path)
+
+
+def download_gzip(url, save_path):
+    """Downloads a GZIP file and saves it to the specified path."""
+    try:
+        response = requests.get(url, stream=True, timeout=10)
+        if response.status_code == 200:
+            with open(save_path, "wb") as file:
+                for chunk in response.iter_content(chunk_size=8192):
+                    file.write(chunk)
+            print(f"Downloaded: {url} -> {save_path}")
+        else:
+            print(f"Failed to download {url} (Status: {response.status_code})")
+    except requests.exceptions.RequestException as e:
+        print(f"Error downloading {url}: {e}")
+
+
 @s1.post("/aircraft/download")
 def download_data(
     file_limit: Annotated[
         int,
         Query(
-            ...,
-            description="""
-    Limits the number of files to download.
-    You must always start from the first the page returns and
-    go in ascending order in order to correctly obtain the results.
-    I'll test with increasing number of files starting from 100.""",
+            ..., description="""Limits the number of files to download.""",
         ),
-    ] = 100,
+    ] = 1000,
 ) -> str:
-    """Downloads the `file_limit` files AS IS inside the folder data/20231101
+    clean_folder(RAW_DATA_PATH)
 
-    data: https://samples.adsbexchange.com/readsb-hist/2023/11/01/
-    documentation: https://www.adsbexchange.com/version-2-api-wip/
-        See "Trace File Fields" section
-
-    Think about the way you organize the information inside the folder
-    and the level of preprocessing you might need.
-
-    To manipulate the data use any library you feel comfortable with.
-    Just make sure to configure it in the `pyproject.toml` file
-    so it can be installed using `poetry update`.
-
-
-    TIP: always clean the download folder before writing again to avoid having old files.
-    """
-    
-    # TODO Implement download
-    download_dir = os.path.join(settings.raw_dir, "day=20231101")
     base_url = "https://samples.adsbexchange.com/readsb-hist/2023/11/01/"
-    os.makedirs(download_dir, exist_ok=True)
+    current_time = datetime.strptime("000000", "%H%M%S")
 
-    try:
-        # Fetch the list of files from the URL mentioned
-        response = requests.get(base_url)
-        response.raise_for_status()
-    except requests.RequestException as e:
-        raise HTTPException(status_code=500, detail=f"Error fetching file list: {e}")
+    for _ in range(file_limit):
+        filename = current_time.strftime("%H%M%SZ.json.gz")
+        file_url = base_url + filename
+        save_path = os.path.join(RAW_DATA_PATH, filename)
+        download_gzip(file_url, save_path)
 
-    
-    soup = BeautifulSoup(response.text, 'html.parser')
-    links = soup.find_all('a')
-    file_links = [link.get('href') for link in links if link.get('href').endswith('.json.gz')]
+        # Increment by 5 seconds
+        current_time += timedelta(seconds=5)
+        if current_time.second == 60:
+            current_time = current_time.replace(second=0)
 
-    if not file_links:
-        raise HTTPException(status_code=404, detail="No JSON files found at the specified URL.")
-
-    # Limiting!
-    files_to_download = file_links[:file_limit]
-
-    for file_name in tqdm(files_to_download, desc="Downloading files"):
-        file_url = base_url + file_name
-        file_path = os.path.join(download_dir, file_name)
-
-        try:
-            with requests.get(file_url, stream=True) as r:
-                r.raise_for_status()
-                with open(file_path, 'wb') as f:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        f.write(chunk)
-        except requests.RequestException as e:
-            raise HTTPException(status_code=500, detail=f"Error downloading {file_name}: {e}")
-
-    return "Download completed successfully."
+    return f"Downloaded {file_limit} files to {RAW_DATA_PATH}"
 
 
 @s1.post("/aircraft/prepare")
 def prepare_data() -> str:
-    """
-    Prepares the raw aircraft data by processing it and saving the processed data
-    into the prepared data directory.
-    """
-    # Define the exact paths
-    raw_dir = os.path.join(settings.raw_dir, "day=20231101")
-    prepared_dir = os.path.join(settings.prepared_dir, "day=20231101")
+    clean_folder(PREPARED_DATA_PATH)
 
-    # Clean the prepared folder before writing again
-    if os.path.exists(prepared_dir):
-        for file in os.listdir(prepared_dir):
-            os.remove(os.path.join(prepared_dir, file))
-    else:
-        os.makedirs(prepared_dir)
+    for file_name in os.listdir(RAW_DATA_PATH):
+        #print list element
+        print(file_name)
+        raw_file_path = os.path.join(RAW_DATA_PATH, file_name)
+        prepared_file_path = os.path.join(PREPARED_DATA_PATH, file_name.replace(".gz", ""))
+        with open(raw_file_path, encoding="utf-8") as raw_file:
+            data = json.load(raw_file)
+            timestamp = data["now"]
+            aircraft_data = data["aircraft"]
+            # Example preprocessing: keep only 'icao', 'lat', 'lon', 'alt_baro'
+            total_records = len(aircraft_data)
+            processed_data = []
 
-    
-    for file_name in os.listdir(raw_dir):
-        print(f"Processing file: {file_name}")
-        raw_file_path = os.path.join(raw_dir, file_name)
-        prepared_file_path = os.path.join(prepared_dir, file_name.replace(".json.gz", ".json"))
+            for record in aircraft_data:
+                processed_data.append({
+                    "icao": record.get("hex", None),
+                    "registration": record.get("r", None),
+                    "type": record.get("t", None),
+                    "lat": record.get("lat", None),
+                    "lon": record.get("lon", None),
+                    "alt_baro": record.get("alt_baro", None),
+                    "timestamp": timestamp,
+                    "max_altitude_baro" : record.get("alt_baro", None),
+                    "max_ground_speed": record.get("gs", None),
+                    "had_emergency": record.get("alert", 0) == 1
+                })
 
-        try:
-            # Open and read the raw file
-            with open(raw_file_path, "r", encoding="utf-8") as raw_file:
-                data = json.load(raw_file)
-                timestamp = data.get("now", None)
-                aircraft_data = data.get("aircraft", [])
-                
-                
-                processed_data = []
-                for record in aircraft_data:
-                    processed_data.append({
-                        "icao": record.get("hex"),
-                        "registration": record.get("r"),
-                        "type": record.get("t"),
-                        "lat": record.get("lat"),
-                        "lon": record.get("lon"),
-                        "alt_baro": record.get("alt_baro"),
-                        "timestamp": timestamp,
-                        "max_altitude_baro": record.get("alt_baro"),
-                        "max_ground_speed": record.get("gs"),
-                        "had_emergency": record.get("alert", 0) == 1,
-                    })
+            with open(prepared_file_path, "w", encoding="utf-8") as prepared_file:
+                json.dump(processed_data, prepared_file)
+            print("Process finished")
+    return f"Prepared data saved to {PREPARED_DATA_PATH}"
 
-                # Saving the processed data
-                with open(prepared_file_path, "w", encoding="utf-8") as prepared_file:
-                    json.dump(processed_data, prepared_file)
-                print(f"Processed and saved: {prepared_file_path}")
 
-        except (json.JSONDecodeError, FileNotFoundError) as e:
-            print(f"Error processing file {file_name}: {e}")
-            continue
-
-    return f"Prepared data saved to {prepared_dir}"
-
-PREPARED_DATA_PATH = os.path.join(settings.prepared_dir, "day=20231101")
 @s1.get("/aircraft/")
-def list_aircraft() -> list:
-    """
-    Returns a list of all unique aircraft (ICAO codes) from the prepared data.
-    """
-    aircraft_set = set()
+def list_aircraft(num_results: int = 100, page: int = 0) -> list[dict]:
+    aircraft = set()
 
-    
     for file_name in os.listdir(PREPARED_DATA_PATH):
-        prepared_file_path = os.path.join(PREPARED_DATA_PATH, file_name)
+        with open(os.path.join(PREPARED_DATA_PATH, file_name), encoding="utf-8") as file:
+            data = json.load(file)
+            aircraft.update(
+                (record["icao"], record.get("registration", "Unknown"), record.get("type", "Unknown"))
+                for record in data if record["icao"]
+            )
 
-        with open(prepared_file_path, "r", encoding="utf-8") as prepared_file:
-            data = json.load(prepared_file)
-            for record in data:
-                if record["icao"]:  
-                    aircraft_set.add(record["icao"])
+    aircraft_list = sorted(list(aircraft), key=lambda x: x[0])
+    start = page * num_results
+    end = start + num_results
 
-    return sorted(aircraft_set)
+    return [
+        {"icao": entry[0], "registration": entry[1], "type": entry[2]}
+        for entry in aircraft_list[start:end]
+    ]
+
 
 @s1.get("/aircraft/{icao}/positions")
-def get_aircraft_position(icao: str) -> dict:
-    """
-    Returns the latest known position (latitude, longitude, altitude) of the aircraft with the given ICAO code.
-    """
-    latest_position = None
+def get_aircraft_position(icao: str, num_results: int = 1000, page: int = 0) -> list[dict]:
+    positions = []
 
-    
     for file_name in os.listdir(PREPARED_DATA_PATH):
-        prepared_file_path = os.path.join(PREPARED_DATA_PATH, file_name)
+        with open(os.path.join(PREPARED_DATA_PATH, file_name), encoding="utf-8") as file:
+            data = json.load(file)
+            positions.extend(
+                {
+                    "timestamp": record.get("timestamp"),
+                    "lat": record.get("lat"),
+                    "lon": record.get("lon"),
+                }
+                for record in data if record["icao"] == icao
+            )
 
-        with open(prepared_file_path, "r", encoding="utf-8") as prepared_file:
-            data = json.load(prepared_file)
-            for record in data:
-                if record["icao"] == icao:
-                    
-                    latest_position = {
-                        "lat": record["lat"],
-                        "lon": record["lon"],
-                        "alt_baro": record["alt_baro"]
-                    }
-
-    return latest_position
-
+    positions = sorted(positions, key=lambda x: x["timestamp"])
+    start = page * num_results
+    end = start + num_results
+    return positions[start:end]
 
 
 @s1.get("/aircraft/{icao}/stats")
-def get_aircraft_statistics() -> dict:
+def get_aircraft_statistics(icao: str) -> dict:
+    """Returns different statistics about the aircraft
+
+    * max_altitude_baro
+    * max_ground_speed
+    * had_emergency
     """
-    Returns statistics about the aircraft data, such as the max altitude, max speed, and emergency counts.
-    """
-    max_altitude = float("-inf")
-    max_speed = float("-inf")
-    emergency_count = 0
+
+    alt = 0
+    speed = 0
+    emergency = False
+    data_found = False
 
 
     for file_name in os.listdir(PREPARED_DATA_PATH):
-        prepared_file_path = os.path.join(PREPARED_DATA_PATH, file_name)
+        file_path = os.path.join(PREPARED_DATA_PATH, file_name)
 
-        with open(prepared_file_path, "r", encoding="utf-8") as prepared_file:
-            data = json.load(prepared_file)
-            for record in data:
-                if record["alt_baro"] is not None:
-                    max_altitude = max(max_altitude, record["alt_baro"])
-                if record["max_ground_speed"] is not None:
-                    max_speed = max(max_speed, record["max_ground_speed"])
-                if record["had_emergency"]:
-                    emergency_count += 1
+        try:
+            with open(file_path, encoding="utf-8") as file:
+                data = json.load(file)
+
+                for record in data:
+                    if record.get("icao", "").lower() == icao.lower():
+                        data_found = True
+
+
+                        record_alt = record.get("max_altitude_baro", 0)
+                        record_speed = record.get("max_ground_speed", 0)
+
+
+                        if record_alt is None:
+                            record_alt = 0
+                        if record_speed is None:
+                            record_speed = 0
+
+
+                        alt = max(alt, record_alt)
+                        speed = max(speed, record_speed)
+
+
+                        emergency = emergency or record.get("had_emergency", False)
+
+        except json.JSONDecodeError as e:
+            print(f"Error decoding JSON in file {file_name}: {e}")
+        except Exception as e:
+            print(f"Unexpected error reading {file_name}: {e}")
+
+    if not data_found:
+        return {"error": f"No data found for ICAO {icao}"}
 
     return {
-        "max_altitude": max_altitude if max_altitude != float("-inf") else None,
-        "max_speed": max_speed if max_speed != float("-inf") else None,
-        "emergency_count": emergency_count
+        "max_altitude_baro": alt,
+        "max_ground_speed": speed,
+        "had_emergency": emergency,
     }
+
