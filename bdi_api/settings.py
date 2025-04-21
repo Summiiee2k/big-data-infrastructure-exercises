@@ -32,7 +32,6 @@ class Settings(BaseSettings):
         description="Call the api like `BDI_S3_BUCKET=yourbucket poetry run uvicorn...`",
     )
 
-
     telemetry: bool = False
     telemetry_dsn: str = "http://project2_secret_token@uptrace:14317/2"
 

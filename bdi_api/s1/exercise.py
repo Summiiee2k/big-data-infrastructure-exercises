@@ -51,7 +51,8 @@ def download_data(
     file_limit: Annotated[
         int,
         Query(
-            ..., description="""Limits the number of files to download.""",
+            ...,
+            description="""Limits the number of files to download.""",
         ),
     ] = 1000,
 ) -> str:
@@ -79,7 +80,7 @@ def prepare_data() -> str:
     clean_folder(PREPARED_DATA_PATH)
 
     for file_name in os.listdir(RAW_DATA_PATH):
-        #print list element
+        # print list element
         print(file_name)
         raw_file_path = os.path.join(RAW_DATA_PATH, file_name)
         prepared_file_path = os.path.join(PREPARED_DATA_PATH, file_name.replace(".gz", ""))
@@ -92,18 +93,20 @@ def prepare_data() -> str:
             processed_data = []
 
             for record in aircraft_data:
-                processed_data.append({
-                    "icao": record.get("hex", None),
-                    "registration": record.get("r", None),
-                    "type": record.get("t", None),
-                    "lat": record.get("lat", None),
-                    "lon": record.get("lon", None),
-                    "alt_baro": record.get("alt_baro", None),
-                    "timestamp": timestamp,
-                    "max_altitude_baro" : record.get("alt_baro", None),
-                    "max_ground_speed": record.get("gs", None),
-                    "had_emergency": record.get("alert", 0) == 1
-                })
+                processed_data.append(
+                    {
+                        "icao": record.get("hex", None),
+                        "registration": record.get("r", None),
+                        "type": record.get("t", None),
+                        "lat": record.get("lat", None),
+                        "lon": record.get("lon", None),
+                        "alt_baro": record.get("alt_baro", None),
+                        "timestamp": timestamp,
+                        "max_altitude_baro": record.get("alt_baro", None),
+                        "max_ground_speed": record.get("gs", None),
+                        "had_emergency": record.get("alert", 0) == 1,
+                    }
+                )
 
             with open(prepared_file_path, "w", encoding="utf-8") as prepared_file:
                 json.dump(processed_data, prepared_file)
@@ -120,17 +123,15 @@ def list_aircraft(num_results: int = 100, page: int = 0) -> list[dict]:
             data = json.load(file)
             aircraft.update(
                 (record["icao"], record.get("registration", "Unknown"), record.get("type", "Unknown"))
-                for record in data if record["icao"]
+                for record in data
+                if record["icao"]
             )
 
     aircraft_list = sorted(list(aircraft), key=lambda x: x[0])
     start = page * num_results
     end = start + num_results
 
-    return [
-        {"icao": entry[0], "registration": entry[1], "type": entry[2]}
-        for entry in aircraft_list[start:end]
-    ]
+    return [{"icao": entry[0], "registration": entry[1], "type": entry[2]} for entry in aircraft_list[start:end]]
 
 
 @s1.get("/aircraft/{icao}/positions")
@@ -146,7 +147,8 @@ def get_aircraft_position(icao: str, num_results: int = 1000, page: int = 0) -> 
                     "lat": record.get("lat"),
                     "lon": record.get("lon"),
                 }
-                for record in data if record["icao"] == icao
+                for record in data
+                if record["icao"] == icao
             )
 
     positions = sorted(positions, key=lambda x: x["timestamp"])
@@ -169,7 +171,6 @@ def get_aircraft_statistics(icao: str) -> dict:
     emergency = False
     data_found = False
 
-
     for file_name in os.listdir(PREPARED_DATA_PATH):
         file_path = os.path.join(PREPARED_DATA_PATH, file_name)
 
@@ -181,20 +182,16 @@ def get_aircraft_statistics(icao: str) -> dict:
                     if record.get("icao", "").lower() == icao.lower():
                         data_found = True
 
-
                         record_alt = record.get("max_altitude_baro", 0)
                         record_speed = record.get("max_ground_speed", 0)
-
 
                         if record_alt is None:
                             record_alt = 0
                         if record_speed is None:
                             record_speed = 0
 
-
                         alt = max(alt, record_alt)
                         speed = max(speed, record_speed)
-
 
                         emergency = emergency or record.get("had_emergency", False)
 
@@ -211,4 +208,3 @@ def get_aircraft_statistics(icao: str) -> dict:
         "max_ground_speed": speed,
         "had_emergency": emergency,
     }
-

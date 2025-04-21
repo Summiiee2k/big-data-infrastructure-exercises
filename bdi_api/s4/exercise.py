@@ -47,7 +47,7 @@ def download_data(file_limit: int = 1000) -> str:
         filename = current_time.strftime("%H%M%SZ.json.gz")
         file_url = base_url + filename
         s3_key = f"{s3_prefix_path}{filename}"
-        
+
         download_gzip_and_store_in_s3(file_url, s3_bucket, s3_key)
 
         current_time += timedelta(seconds=5)
@@ -74,12 +74,10 @@ def prepare_data() -> str:
     s3_prefix_path = "raw/day=20231101/"
     local_prepared_path = settings.prepared_dir
 
-    
     clean_folder(local_prepared_path)
     os.makedirs(local_prepared_path, exist_ok=True)
 
     try:
-        
         response = s3.list_objects_v2(Bucket=s3_bucket, Prefix=s3_prefix_path)
 
         if "Contents" not in response:
@@ -90,14 +88,12 @@ def prepare_data() -> str:
             filename = os.path.basename(s3_key)
             prepared_file_path = os.path.join(local_prepared_path, filename.replace(".gz", ""))
 
-            
             try:
-                
                 response = s3.get_object(Bucket=s3_bucket, Key=s3_key)
-                
+
                 with gzip.GzipFile(fileobj=io.BytesIO(response["Body"].read())) as gz_file:
                     data = json.loads(gz_file.read().decode("utf-8"))
-            
+
             except Exception as e:
                 print(f"Error processing file {s3_key}: {e}")
 

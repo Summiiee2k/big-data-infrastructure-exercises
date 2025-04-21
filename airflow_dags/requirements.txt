@@ -1,0 +1,6 @@
+# Astro Runtime includes the following pre-installed providers packages: https://www.astronomer.io/docs/astro/runtime-image-architecture#provider-packages
+apache-airflow-providers-amazon==9.1.0
+apache-airflow-providers-postgres==5.11.0
+pandas==2.2.2
+requests==2.31.0
+psycopg2-binary==2.9.9
